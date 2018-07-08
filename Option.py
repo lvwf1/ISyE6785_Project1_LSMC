@@ -60,28 +60,45 @@ class Option(object):
 
 # This is a function simulating the price path for a Geometric Brownian Motion price model
 # dS = mu*S*dt + sigma*S*dW
-def gen_paths(S0, r, sigma, T, M, I):
-    dt = float(T) / M
-    paths = np.zeros((M + 1, I), np.float64)
-    paths[0] = S0
-    for t in range(1, M + 1):
-        rand = np.random.standard_normal(I)
-        paths[t] = paths[t - 1] * np.exp((r - 0.5 * sigma ** 2) * dt +
-                                         sigma * np.sqrt(dt) * rand)
-    return paths
 
-def gen_paths_antithetic(S0, r, sigma, T, M, I):
+def gen_paths(S0_1, S0_2, r, delta_1, delta_2, sigma_1, sigma_2, rho, T, M, I):
     dt = float(T) / M
-    paths = np.zeros((2*M + 1, I), np.float64)
-    paths[0] = S0
+    path_1 = np.zeros((M + 1, I), np.float64)
+    path_2 = np.zeros((M + 1, I), np.float64)
+    path_1[0] = S0_1
+    path_2[0] = S0_2
     for t in range(1, M + 1):
-        rand = np.random.standard_normal(I)
-        rand_anti = -1.0*rand # antithetic variates
-        paths[2*t] = paths[2*(t - 1)] * np.exp((r - 0.5 * sigma ** 2) * dt +
-                                         sigma * np.sqrt(dt) * rand)
-        paths[2*t-1] = paths[max(2*t - 3, 0)] * np.exp((r - 0.5 * sigma ** 2) * dt +
-                                         sigma * np.sqrt(dt) * rand_anti)
-    return paths
+        rand_1 = np.random.standard_normal(I)
+        rand_2 = np.random.standard_normal(I)
+        path_1[t] = path_1[t - 1] * np.exp((r - delta_1) * dt +
+                                           sigma_1 * np.sqrt(dt) * rand_1)
+        path_2[t] = path_2[t - 1] * np.exp((r - delta_2) * dt +
+                                           rho * sigma_2 * np.sqrt(dt) * rand_1 +
+                                           np.sqrt(1-rho**2) * sigma_2 * np.sqrt(dt) * rand_2)
+    return [path_1,path_2]
+
+def gen_paths_antithetic(S0_1, S0_2, r, delta_1, delta_2, sigma_1, sigma_2, rho, T, M, I):
+    dt = float(T) / M
+    path_1 = np.zeros((2*M + 1, I), np.float64)
+    path_2 = np.zeros((2*M + 1, I), np.float64)
+    path_1[0] = S0_1
+    path_2[0] = S0_2
+    for t in range(1, M + 1):
+        rand_1 = np.random.standard_normal(I)
+        rand_2 = np.random.standard_normal(I)
+        rand_anti_1 = -1.0 * rand_1  # antithetic variates
+        rand_anti_2 = -1.0 * rand_2  # antithetic variates
+        path_1[2 * t] = path_1[2 * (t - 1)] * np.exp((r - delta_1) * dt +
+                                                   sigma_1 * np.sqrt(dt) * rand_1)
+        path_1[2 * t - 1] = path_1[max(2 * t - 3, 0)] * np.exp((r - delta_1) * dt +
+                                                             sigma_1 * np.sqrt(dt) * rand_anti_1)
+        path_2[2*t] = path_2[2*(t - 1)] * np.exp((r - delta_2) * dt +
+                                               rho * sigma_2 * np.sqrt(dt) * rand_1 +
+                                               np.sqrt(1 - rho ** 2) * sigma_2 * np.sqrt(dt) * rand_2)
+        path_2[2*t-1] = path_2[max(2*t - 3, 0)] * np.exp((r - delta_2) * dt +
+                                                       rho * sigma_2 * np.sqrt(dt) * rand_anti_1 +
+                                                       np.sqrt(1 - rho ** 2) * sigma_2 * np.sqrt(dt) * rand_anti_2)
+    return [path_1,path_2]
 
 def hist_comp(dist1, dist2, lgnd, bin_num):
     hist_start = min(min(dist1), min(dist2))
@@ -91,137 +108,112 @@ def hist_comp(dist1, dist2, lgnd, bin_num):
     plt.legend(loc='upper right')
     plt.show()
 
-S0 = 34.
-K = 100.0
-r = 0.05
-sigma = 0.35
-T = 1
-N = 1 #252
-deltat = T / N
-i = 1000
+S0_1 = 100.0
+S0_2 = 95.0
+K = 90.0
+r = 0.045
+delta_1 = 0.02
+sigma_1 = 0.2
+delta_2 = 0.005
+sigma_2 = 0.25
+rho = 0.3
+T = 0.5
+M = 200 #252
+i = 100
 discount_factor = np.exp(-r * T)
 
 ## Closed-form option price
 start_time = time.time()
-option = Option(S0, K, T, r, sigma, 'call')
-print('B-S price: %f, time used: %f.' % (option.value(), time.time()-start_time))
+option_1 = Option(S0_1, K, T, r, sigma_1, 'call')
+option_2 = Option(S0_2, K, T, r, sigma_2, 'call')
+print('B-S price for Asset 1: %f, time used: %f.' % (option_1.value(), time.time()-start_time))
+print('B-S price for Asset 2: %f, time used: %f.' % (option_2.value(), time.time()-start_time))
 
 ## Set seed for a random number generator
-np.random.seed(17) #
 start_time = time.time()
-paths = gen_paths(S0, r, sigma, T, N, i)
-
+np.random.seed(17)
+[path1,path2] = gen_paths(S0_1, S0_2, r, delta_1, delta_2, sigma_1, sigma_2, rho, T, M, i)
+duration = time.time()-start_time
 
 ## Plot all sample paths
-#pd.DataFrame(paths).plot()
-#plt.show()
-
-# Compute the value of a Call option
-CallPayoffAverage = np.average(np.maximum(0, paths[-1] - K))
-CallPayoff = discount_factor * CallPayoffAverage
-mc_time = time.time() - start_time
-print('MC estimator: %f, MC time used: %f.' % (CallPayoff,mc_time))
-
-## Antithetic variate estimator
-np.random.seed(17) #
-start_time = time.time()
-paths_anti = gen_paths_antithetic(S0, r, sigma, T, N, i)
-CallPayoffAverage = np.average(np.maximum(0, paths_anti[-1] - K))
-CallPayoffAverage_tilda = np.average(np.maximum(0, paths_anti[-2] - K))
-CallPayoff_anti = discount_factor * (CallPayoffAverage+CallPayoffAverage_tilda)/2.0
-mcav_time = time.time() - start_time
-print('Antithetic variate estimator: %f, Antithetic variate time used: %f.' % (CallPayoff_anti,mcav_time))
-
-M = 10000  # number of Monte Carlo estimators
-MC_vec = []
-MCAV_vec = []
-for j in range(M):
-    np.random.seed(j+1)
-    paths = gen_paths(S0, r, sigma, T, N, i)
-    CallPayoffAverage = np.average(np.maximum(0, paths[-1] - K))
-    CallPayoff = discount_factor * CallPayoffAverage
-    MC_vec.append(CallPayoff)
-    paths_anti = gen_paths_antithetic(S0, r, sigma, T, N, i)
-    CallPayoffAverage = np.average(np.maximum(0, paths_anti[-1] - K))
-    CallPayoffAverage_tilda = np.average(np.maximum(0, paths_anti[-2] - K))
-    CallPayoff_anti = discount_factor * (CallPayoffAverage+CallPayoffAverage_tilda)/2.0
-    MCAV_vec.append(CallPayoff_anti)
-
-
-MC_mean = np.average(MC_vec)
-MC_std = np.sqrt(np.var(MC_vec))
-
-print('Naive MC estimator mean: %f, standard dev: %f.' % (MC_mean, MC_std))
-print('Antithetic Variates MC estimator mean: %f, standard dev: %f.' % (np.average(MCAV_vec), np.sqrt(np.var(MCAV_vec))))
-
-### Plot the histogram of the Monte Carlo estimators and the Antithetic Variate estimators
-hist_start = min(min(MC_vec), min(MCAV_vec))
-hist_end = max(max(MC_vec), max(MCAV_vec))
-bin_num = 40
-bin_vec = np.linspace(hist_start, hist_end, bin_num)
-plt.hist([MC_vec, MCAV_vec], color=['r','g'], label=['MC','MCAV'], alpha=0.8, bins=bin_vec)
-plt.legend(loc='upper right')
+pd.DataFrame(path1).plot()
+plt.xlabel('time')
+plt.ylabel('price')
+pd.DataFrame(path2).plot()
+plt.xlabel('time')
+plt.ylabel('price')
 plt.show()
 
-## LR() is the likelihood ratio function L in the paper. The following LR() corresponds to the log-normal price model
-## Different price models have different LR functions for the Importance Sampling algorithm
-def LR(s, s0, mu, rf, sigma, T):
-    return np.power(s/s0, (rf-mu)/sigma/sigma)*np.exp((mu*mu - rf*rf)*T/sigma/sigma/2.0)
 
-S0 = 34.
-K = 70.0
-r = 0.05
-sigma = 0.35
-T = 1
-N = 1 #252
-deltat = T / N
-M = 10000
-discount_factor = np.exp(-r * T)
+# Compute the value of a Call option
+CallPayoffAverage_1 = np.average(np.maximum(0, path1[-1] - K))
+CallPayoff_1 = discount_factor * CallPayoffAverage_1
+print('MC estimator for Asset 1: %f, time used: %f.' % (CallPayoff_1, duration))
+CallPayoffAverage_2 = np.average(np.maximum(0, path2[-1] - K))
+CallPayoff_2 = discount_factor * CallPayoffAverage_2
+print('MC estimator for Asset 2: %f, time used: %f.' % (CallPayoff_2, duration))
 
+## Antithetic variate estimator
 start_time = time.time()
-option = Option(S0, K, T, r, sigma, 'call')
-print('B-S price: %f, time used: %f.' % (option.value(), time.time()-start_time))
+[path_1_anti,path_2_anti] = gen_paths_antithetic(S0_1, S0_2, r, delta_1, delta_2, sigma_1, sigma_2, rho, T, M, i)
+CallPayoffAverage_1 = np.average(np.maximum(0, path_1_anti[-1] - K))
+CallPayoffAverage_tilda_1 = np.average(np.maximum(0, path_1_anti[-2] - K))
+CallPayoff_anti_1 = discount_factor * (CallPayoffAverage_1+CallPayoffAverage_tilda_1)/2.0
+CallPayoffAverage_2 = np.average(np.maximum(0, path_2_anti[-1] - K))
+CallPayoffAverage_tilda_2 = np.average(np.maximum(0, path_2_anti[-2] - K))
+CallPayoff_anti_2 = discount_factor * (CallPayoffAverage_2+CallPayoffAverage_tilda_2)/2.0
+mcav_time = time.time() - start_time
+print('Antithetic variate estimator for path1: %f, Antithetic variate time used: %f.' % (CallPayoff_anti_1,mcav_time))
+print('Antithetic variate estimator for path2: %f, Antithetic variate time used: %f.' % (CallPayoff_anti_2,mcav_time))
 
-## mu is the mean parameter for the new samplng distribution
-mu = np.log(K) - np.log(S0) - 0.6  # K = 100, -0.96
-print(mu)
+M = 100  # number of Monte Carlo estimators
+MC_vec_1 = []
+MCAV_vec_1 = []
+MC_vec_2 = []
+MCAV_vec_2 = []
+for j in range(M):
+    np.random.seed(j+1)
+    [path1,path2] = gen_paths(S0_1, S0_2, r, delta_1, delta_2, sigma_1, sigma_2, rho, T, M, i)
+    CallPayoffAverage_1 = np.average(np.maximum(0, path1[-1] - K))
+    CallPayoff_1 = discount_factor * CallPayoffAverage_1
+    CallPayoffAverage_2 = np.average(np.maximum(0, path2[-1] - K))
+    CallPayoff_2 = discount_factor * CallPayoffAverage_2
+    MC_vec_1.append(CallPayoff_1)
+    MC_vec_2.append(CallPayoff_2)
+    [path_1_anti, path_2_anti] = gen_paths_antithetic(S0_1, S0_2, r, delta_1, delta_2, sigma_1, sigma_2, rho, T, M, i)
+    CallPayoffAverage_1 = np.average(np.maximum(0, path_1_anti[-1] - K))
+    CallPayoffAverage_tilda_1 = np.average(np.maximum(0, path_1_anti[-2] - K))
+    CallPayoff_anti_1 = discount_factor * (CallPayoffAverage_1 + CallPayoffAverage_tilda_1) / 2.0
+    CallPayoffAverage_2 = np.average(np.maximum(0, path_1_anti[-1] - K))
+    CallPayoffAverage_tilda_2 = np.average(np.maximum(0, path_2_anti[-2] - K))
+    CallPayoff_anti_2 = discount_factor * (CallPayoffAverage_2 + CallPayoffAverage_tilda_2) / 2.0
+    MCAV_vec_1.append(CallPayoff_anti_1)
+    MCAV_vec_2.append(CallPayoff_anti_2)
 
-np.random.seed(1711) #
-start_time = time.time()
-paths_org = gen_paths(S0, r, sigma, T, N, M)
-paths_chg = gen_paths(S0, mu, sigma, T, N, M)
+MC_mean_1 = np.average(MC_vec_1)
+MC_std_1 = np.sqrt(np.var(MC_vec_1))
+MC_mean_2 = np.average(MC_vec_2)
+MC_std_2 = np.sqrt(np.var(MC_vec_2))
 
-CallPayoffAverage = np.average(np.maximum(0, paths_org[-1] - K))
-CallPrice = discount_factor * CallPayoffAverage
+print('Naive MC estimator for Asset 1 mean: %f, standard dev: %f.' % (MC_mean_1, MC_std_1))
+print('Antithetic Variates MC estimator for Asset 1 mean: %f, standard dev: %f.' % (np.average(MCAV_vec_1), np.sqrt(np.var(MCAV_vec_1))))
 
-#print(np.maximum(0, paths_chg[-1] - K))
+print('Naive MC estimator for Asset 2 mean: %f, standard dev: %f.' % (MC_mean_2, MC_std_2))
+print('Antithetic Variates MC estimator for Asset 2 mean: %f, standard dev: %f.' % (np.average(MCAV_vec_2), np.sqrt(np.var(MCAV_vec_2))))
 
-CallPayoffAverage_IS = np.average(np.maximum(0, paths_chg[-1] - K)*np.array(LR(paths_chg[-1], S0, mu, r, sigma, T)))
-CallPrice_IS = discount_factor * CallPayoffAverage_IS
 
-print('MC estimator: %f, MC Importance Sampling estimator: %f.' % (CallPrice, CallPrice_IS))
-
-Run_num = 1000  # number of Monte Carlo estimators
-M = 250
-MC_vec = []
-MCIS_vec = []
-for j in range(Run_num):
-    np.random.seed(j*j)
-    paths = gen_paths(S0, r, sigma, T, N, M)
-    CallPayoffAverage = np.average(np.maximum(0, paths[-1] - K))
-    CallPrice = discount_factor * CallPayoffAverage
-    MC_vec.append(CallPrice)
-
-    paths_chg = gen_paths(S0, mu, sigma, T, N, M)
-    CallPayoffAverage_IS = np.average(np.maximum(0, paths_chg[-1] - K)*np.array(LR(paths_chg[-1], S0, mu, r, sigma, T)))
-    CallPrice_IS = discount_factor * CallPayoffAverage_IS
-    MCIS_vec.append(CallPrice_IS)
-
-MC_mean = np.average(MC_vec)
-MC_std = np.sqrt(np.var(MC_vec))
-
-print('Naive MC estimator mean: %f, standard dev: %f.' % (MC_mean, MC_std))
-print('Importance Sampling MC estimator mean: %f, standard dev: %f.' % (np.average(MCIS_vec), np.sqrt(np.var(MCIS_vec))))
-legend = ['MC', 'MCIS']
+### Plot the histogram of the Monte Carlo estimators and the Antithetic Variate estimators
+hist_start = min(min(MC_vec_1), min(MCAV_vec_1))
+hist_end = max(max(MC_vec_1), max(MCAV_vec_1))
 bin_num = 40
-hist_comp(MC_vec, MCIS_vec, legend, bin_num)
+bin_vec = np.linspace(hist_start, hist_end, bin_num)
+plt.hist([MC_vec_1, MCAV_vec_1], color=['r','g'], label=['MC','MCAV'], alpha=0.8, bins=bin_vec)
+plt.legend(loc='upper right')
+plt.show()
+hist_start = min(min(MC_vec_2), min(MCAV_vec_2))
+hist_end = max(max(MC_vec_2), max(MCAV_vec_2))
+bin_num = 40
+bin_vec = np.linspace(hist_start, hist_end, bin_num)
+plt.hist([MC_vec_2, MCAV_vec_2], color=['r','g'], label=['MC','MCAV'], alpha=0.8, bins=bin_vec)
+plt.legend(loc='upper right')
+plt.show()
